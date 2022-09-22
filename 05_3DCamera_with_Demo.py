@@ -16,7 +16,7 @@ class_name = 'down'
 exercise = '102'
 model_path = os.path.join('./Train', exercise, 'params', exercise + '.pkl')
 
-Record_dir = './Recored'
+Record_dir = './Record'
 filename = str(datetime.now().strftime("%Y%m%d_%H%M%S"))
 out_video_path = os.path.join(Record_dir, filename + '.mp4')
 
@@ -33,7 +33,7 @@ with open(model_path, 'rb') as f:
 
 
 video_n_frames = 1200
-video_width = 1280
+video_width = 1280 
 video_height = 720
 video_fps = 30
 demo_scale = 0.2
@@ -151,13 +151,19 @@ def classification(pipeOut, q,):
         q.put(output_frame)
         
        
-def show_image_process(q, stop_sign):
+def show_image_process(qIn, qOut, stop_sign):
     demo_cap = cv2.VideoCapture(demo_src)
     out = cv2.VideoWriter(out_video_path, cv2.VideoWriter_fourcc(*'mp4v'), video_fps, (video_width, video_height))
     while True:
-        output_frame = q.get()
+        output_frame = qIn.get()
         
         success, demo_frame = demo_cap.read()
+                
+        if not success:
+            out.release()
+            stop_sign.value = 0
+            break
+        
         h, w, _ = demo_frame.shape
         demo_frame = cv2.resize(demo_frame, (int(w * demo_scale), int(h * demo_scale)))
         h, w, _ = demo_frame.shape
@@ -165,25 +171,26 @@ def show_image_process(q, stop_sign):
         img[0:h, 0:w, :] = demo_frame
         cv2.imshow('img', img)
         out.write(img)
-
         key = cv2.waitKey(1)
         if key == 27 or 0xFF == ord('q'):
             out.release()
             stop_sign.value = 0
-        
-        if not success:
-            stop_sign.value = 0
-        
+            break
+
+def Record(q):
+    frame = q.get()
+
 
 def main():
 
     pipeOut_GetFrame, pipeIn_getFame = Pipe() 
     q = Queue()
+    q_record = Queue()
     stop_sign = Value('i', 1)
 
     p_realsense = Process(target=RealSense_get_frame, args=(pipeIn_getFame,))
     p_classification = Process(target=classification, args=(pipeOut_GetFrame, q,))
-    p_show = Process(target=show_image_process, args=(q, stop_sign))
+    p_show = Process(target=show_image_process, args=(q, q_record, stop_sign))
     p_realsense.start()
     p_classification.start()
     p_show.start()

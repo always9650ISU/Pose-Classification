@@ -1,3 +1,3 @@
 call ../venv/PoseClassification/Scripts/activate
-python 04_3DCamera_test.py
+python 05_3DCamera_with_Demo.py
 pause

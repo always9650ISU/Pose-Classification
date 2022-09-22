@@ -171,6 +171,9 @@ def show_image_process(q, stop_sign):
             out.release()
             stop_sign.value = 0
         
+        if not success:
+            stop_sign.value = 0
+        
 
 def main():
 

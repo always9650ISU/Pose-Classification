@@ -1,0 +1,35 @@
+101:
+  pose: ['down','left','right','start','up']
+  rule: ['down','up','right','left']
+
+102:
+  pose: ['down', 'horizontal', 'up']
+  rule: ['down', 'horizontal', 'up', 'horizontal',]
+
+103:
+  pose: ['down', 'horizontal', 'up']
+  rule: ['down', 'horizontal', 'up', 'horizontal',]
+
+104:
+  pose: ['left_leg_left_hand','left_leg_left_hand_side','left_leg_right_hand','left_leg_right_hand_side','right_leg_left_hand','right_leg_left_hand_side','right_leg_right_hand','right_leg_right_hand_side', 'start']
+  rule: ['left_leg_left_hand', left_leg_right_hand]
+
+201:
+  pose: ['down','start','up']
+  rule: ['up', 'down',]
+
+203:
+  pose: ['left_straight','rest', 'right_straight', triangle]
+  rule: ['triangle', 'left_straight']
+
+204:
+  pose: ['down','start','up']
+  rule: ['down', 'up']
+
+206:
+  pose: ['left', 'medium', 'right', 'stand', ]
+  rule: ['left', 'medium', 'right',]
+
+
+
+

@@ -73,7 +73,6 @@ def classification(pipeOut, q,):
         alpha=0.2)
 
     repetition_counter = RepetitionCounter_Custom(
-        class_name=class_name,
         enter_threshold=6,
         exit_threshold=4, 
         circle_order=exercise_config[int(exercise)]['rule'])
@@ -125,7 +124,11 @@ def classification(pipeOut, q,):
             pose_classification_filtered = pose_classification_filter(pose_classification)
             # Count repetitions.
             repetitions_count = repetition_counter(pose_classification_filtered)
-            
+            output_frame = drawText(output_frame, point=(10, 360), texts=pose_prob)
+            target = {"Next":str(repetition_counter.target)}
+            print(target)
+            output_frame = drawText(output_frame, fontScale=2, point=(10, 660), texts=target )
+
         else:
             # No pose => no classification on current frame.
             pose_classification = None
@@ -148,10 +151,12 @@ def classification(pipeOut, q,):
                 repetitions_count=repetitions_count,
                 time= fps
                 )
+        
+        
         q.put(output_frame)
         
        
-def show_image_process(qIn, qOut, stop_sign):
+def show_image_process(qIn, stop_sign):
     demo_cap = cv2.VideoCapture(demo_src)
     out = cv2.VideoWriter(out_video_path, cv2.VideoWriter_fourcc(*'mp4v'), video_fps, (video_width, video_height))
     while True:
@@ -177,20 +182,16 @@ def show_image_process(qIn, qOut, stop_sign):
             stop_sign.value = 0
             break
 
-def Record(q):
-    frame = q.get()
-
 
 def main():
 
     pipeOut_GetFrame, pipeIn_getFame = Pipe() 
     q = Queue()
-    q_record = Queue()
     stop_sign = Value('i', 1)
 
     p_realsense = Process(target=RealSense_get_frame, args=(pipeIn_getFame,))
     p_classification = Process(target=classification, args=(pipeOut_GetFrame, q,))
-    p_show = Process(target=show_image_process, args=(q, q_record, stop_sign))
+    p_show = Process(target=show_image_process, args=(q, stop_sign))
     p_realsense.start()
     p_classification.start()
     p_show.start()

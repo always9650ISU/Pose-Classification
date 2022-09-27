@@ -17,6 +17,31 @@ import copy
 from mediapipe.python.solutions import drawing_utils as mp_drawing
 from mediapipe.python.solutions import pose as mp_pose
 
+def drawText(img,
+            fontFace=cv2.FONT_HERSHEY_COMPLEX,
+            fontScale=1,
+            color=(255, 0, 0),
+            thickness=1,
+            lineType=cv2.LINE_AA,
+            textSpacing=35,
+            point=(0, 0), 
+            texts={}):
+    x, y = point
+    
+    for key, value in texts.items():
+        text = f"{key}:{value}"
+        cv2.putText(img, 
+                    text, 
+                    (x,y),
+                    fontFace,
+                    fontScale,
+                    color,
+                    thickness,
+                    lineType
+                    )
+        y += textSpacing
+    
+    return img
 
 def show_image(img):
   """Shows output PIL image."""
@@ -352,8 +377,8 @@ class RepetitionCounter(object):
 class RepetitionCounter_Custom(object):
   """Counts number of repetitions of given target pose class."""
 
-  def __init__(self, class_name, enter_threshold=6, exit_threshold=4, circle_order=[]):
-    self._class_name = class_name
+  def __init__(self, enter_threshold=6, exit_threshold=4, circle_order=[]):
+    # self._class_name = class_name
 
     # If pose counter passes given threshold, then we enter the pose.
     self._enter_threshold = enter_threshold
@@ -364,7 +389,7 @@ class RepetitionCounter_Custom(object):
     
     self.circle_order = circle_order
     self.circle_order_copy = copy.deepcopy(circle_order)
-
+    self.target = None
     # Number of times we exited the pose.
     self._n_repeats = 0
 
@@ -392,12 +417,12 @@ class RepetitionCounter_Custom(object):
       Integer counter of repetitions.
     """
     
-    target = self.circle_order_copy[0]
-    if not target in pose_classification:
+    self.target = self.circle_order_copy[0]
+    if not self.target in pose_classification:
       return self._n_repeats
-    if pose_classification[target] >= self._enter_threshold:
+    if pose_classification[self.target] >= self._enter_threshold:
       self.circle_order_copy.pop(0)
-    
+
     if len(self.circle_order_copy) == 0:
       self._n_repeats += 1
       self.circle_order_copy = copy.deepcopy(self.circle_order)
@@ -523,6 +548,7 @@ class PoseClassificationVisualizer(object):
     plt.close()
 
     return img
+
 
 class BootstrapHelper(object):
   """Helps to bootstrap images and filter pose samples for classification."""

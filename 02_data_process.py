@@ -4,6 +4,12 @@ import os
 input_Folder = './Label'
 out_folder = './Train'
 
+
+if not os.path.exists(input_Folder):
+    os.makedirs(input_Folder)
+if not os.path.exists(out_folder):
+    os.makedirs(out_folder)
+
 for foldername in os.listdir(input_Folder):
     # print(foldername)
     # if not foldername.endswith("jpg"):

@@ -2,24 +2,26 @@ import cv2
 import os
 import tqdm
 
-# filename = 'temp'
 Input_Dir = './Input_Video' 
 Save_Dir = './Output_frame' 
-# Save Frame path 
-# DirPath = 
+
+if not os.path.exists(Input_Dir):
+    os.makedirs(Input_Dir)
+if not os.path.exists(Save_Dir):
+    os.makedirs(Save_Dir)
 
 for filename in os.listdir(Input_Dir):
     
-    if not filename.endswith('MP4'):
+    if not filename.endswith('MP4') and not filename.endswith('MOV'):
         continue
     
     video_path = os.path.join(Input_Dir, filename)
-
     SaveDir = os.path.join(Save_Dir, filename.split('-')[0])
 
     if not os.path.exists(SaveDir):
         os.makedirs(SaveDir)
     else:
+        print("*",filename)
         continue
 
     print(filename)
@@ -40,11 +42,6 @@ for filename in os.listdir(Input_Dir):
                 break
             
             cv2.imwrite(SavePath ,frame)
-
+            frame_counter += 1
             pbar.update()
             
-            # key = cv2.waitKey(1)
-            # if key == 27 or 0xFF == ord('q'):
-            #     break 
-            # print(f'frame:{frame_counter}')
-            frame_counter += 1

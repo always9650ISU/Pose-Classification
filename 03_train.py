@@ -7,6 +7,10 @@ import pickle
 
 FolderPath = './train'
 
+
+if not os.path.exists(FolderPath):
+    os.makedirs(FolderPath)
+
 for foldername in os.listdir(FolderPath):
 # Model params
     data_dir = os.path.join(FolderPath, foldername, 'csv_out')

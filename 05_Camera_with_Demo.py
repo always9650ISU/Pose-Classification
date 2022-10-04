@@ -17,7 +17,7 @@ def main():
 
     p_realsense = Process(target=Camera_get_frame, args=(pipeIn_getFame,))
     p_classification = Process(target=classification, args=(pipeOut_GetFrame, q, exercise, ))
-    p_show = Process(target=show_image_process, args=(q, stop_sign, exercise, False))
+    p_show = Process(target=show_image_process, args=(q, stop_sign, exercise, True))
     p_realsense.start()
     p_classification.start()
     p_show.start()

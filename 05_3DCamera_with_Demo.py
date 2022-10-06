@@ -1,39 +1,43 @@
-
 import cv2 
 from multiprocessing import Process, Pipe, Queue, Value
-import os
+import os 
 import time
-from func.utils import RealSense_get_frame, classification, show_image_process
+from func.utils import RealSense_get_frame, classification, show_image_process, Demo_frame
 
 
 
-exercise = '102'
-# model_path = os.path.join('./Train', exercise, 'params', exercise + '.pkl')
-
-# video_width = 1280
-# video_height = 720
-# video_fps = 30
-
+exercise = ['101','102']
+        
 
 def main():
+    q_camera = Queue()
+    q_demo = Queue()
+    q_keypoint = Queue()
+    stop_sign = Value('i', 0)
+    exercise_idx = Value("i", 0)
 
-    pipeOut_GetFrame, pipeIn_getFame = Pipe() 
-    q = Queue()
-    stop_sign = Value('i', 1)
 
-    # p_realsense = Process(target=RealSense_get_frame, args=(pipeIn_getFame,))
-    p_realsense = Process(target=RealSense_get_frame, args=(pipeIn_getFame,))
-    p_classification = Process(target=classification, args=(pipeOut_GetFrame, q, exercise, ))
-    p_show = Process(target=show_image_process, args=(q, stop_sign, exercise, True,))
+    p_realsense = Process(target=RealSense_get_frame, 
+                          args=(q_camera, stop_sign))
+    p_demo = Process(target=Demo_frame, 
+                     args=(q_demo, exercise, stop_sign,),
+                     kwargs={"exercise_idx": exercise_idx})
+    p_classification = Process(target=classification, 
+                               args=(q_camera, q_keypoint, exercise, stop_sign), 
+                               kwargs={"demo": q_demo, "exercise_idx": exercise_idx})
+    p_show = Process(target=show_image_process, 
+                     args=(q_keypoint, stop_sign, ), )
     p_realsense.start()
+    p_demo.start()
     p_classification.start()
     p_show.start()
     
     while True:
         time.sleep(0.1)    
-        if stop_sign.value == 0:
+        if stop_sign.value == 1:
             p_realsense.terminate()
             p_classification.terminate()
+            p_demo.terminate()
             p_show.terminate()
             break
 
@@ -45,7 +49,4 @@ if __name__ == "__main__":
 '''
 3D camera multiprocessing refference 
 https://github1s.com/soarwing52/Remote-Realsense/blob/master/command_class.py#L166
-
-Media or Voice play
-https://ithelp.ithome.com.tw/m/articles/10258673
 '''

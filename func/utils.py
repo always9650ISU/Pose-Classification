@@ -1,11 +1,9 @@
-from itertools import count
 from matplotlib import pyplot as plt
 import io
 from PIL import Image, ImageFont, ImageDraw
 import time
 import requests
 import cv2
-from matplotlib import pyplot as plt
 import numpy as np
 import os
 import sys
@@ -18,7 +16,7 @@ from datetime import datetime
 from mediapipe.python.solutions import drawing_utils as mp_drawing
 from mediapipe.python.solutions import pose as mp_pose
 import pickle
-
+from multiprocessing import  current_process
 class_name = 'down'
 video_n_frames = 1200
 
@@ -26,7 +24,7 @@ video_n_frames = 1200
 def drawText(img,
             fontFace=cv2.FONT_HERSHEY_COMPLEX,
             fontScale=1,
-            color=(255, 0, 0),
+            color=(0, 0, 255),
             thickness=1,
             lineType=cv2.LINE_AA,
             textSpacing=35,
@@ -49,200 +47,238 @@ def drawText(img,
     
     return img
 
-def RealSense_get_frame(pipeIn,):
-    pipeline = rs.pipeline()
-    config = rs.config()
-    
-    video_fps = 30 
-    video_width = 1280
-    video_height = 720
+def RealSense_get_frame(q, stop_sign) :
+  pipeline = rs.pipeline()
+  config = rs.config()
+  
+  video_fps = 30 
+  video_width = 1280
+  video_height = 720
 
-    config.enable_stream(rs.stream.color, video_width, video_height, rs.format.bgr8, video_fps)
-    profile = pipeline.start(config)
+  config.enable_stream(rs.stream.color, video_width, video_height, rs.format.bgr8, video_fps)
+  profile = pipeline.start(config)
+  
+  sensor = profile.get_device().query_sensors()
+  sensor[1].set_option(rs.option.frames_queue_size, 32)
+  
+  while True:
+    frames = pipeline.wait_for_frames()
+    input_frame = frames.get_color_frame()
+    input_frame = np.asanyarray(input_frame.get_data())
+    # input_frame = cv2.cvtColor(input_frame, cv2.COLOR_BGR2RGB)
+   
+    q.put(input_frame)
     
-    sensor = profile.get_device().query_sensors()
-    sensor[1].set_option(rs.option.frames_queue_size, 32)
+    if stop_sign.value == 1:
+      break
+ 
+
+def Camera_get_frame(q, stop_sign):
+  video_cap = cv2.VideoCapture(0)
+  width = 1280 
+  height = 720
+  video_cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+  video_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+  while True:
+    success, input_frame = video_cap.read()
+    if not success:
+      print(" No camera")
+      break
+
+    q.put(input_frame)
     
+    if stop_sign.value == 1:
+      break
+
+def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exercise_idx=0, demo_scale=0.4 ):
+  
+  model_path = os.path.join('./Train', 
+                            exercise[exercise_idx.value],
+                            'params', 
+                            exercise[exercise_idx.value] + '.pkl')
+
+  with open('./rule.yaml', 'r') as f:
+    config = yaml.load(f, Loader=yaml.SafeLoader)
+  
+  with open(model_path, 'rb') as f:
+    model = pickle.load(f)
+
+  pose = config[int(exercise[exercise_idx.value])]['pose']
+  pose_tracker = mp_pose.Pose(model_complexity=0)
+
+  pose_classification_filter = EMADictSmoothing(
+      window_size=10,
+      alpha=0.2)
+
+  repetition_counter = RepetitionCounter_Custom(
+      enter_threshold=6,
+      exit_threshold=4, 
+      circle_order=config[int(exercise[exercise_idx.value])]['rule'])
+
+  pose_classification_visualizer = PoseClassificationVisualizer(
+      class_name=class_name,
+      plot_x_max=video_n_frames,
+      # Graphic looks nicer if it's the same as `top_n_by_mean_distance`.
+      plot_y_max=10)
+
+  exercise_count = exercise_idx.value
+  
+  while True:
+    
+    if exercise_idx != exercise_count:
+      model_path = os.path.join('./Train', 
+                          exercise[exercise_idx.value],
+                          'params', 
+                          exercise[exercise_idx.value] + '.pkl')
+      with open(model_path, 'rb') as f:
+        model = pickle.load(f)
+
+    start_time = time.time()
+    input_frame = q_camera.get()
+    b_time = time.time()
+    # print('input:',b_time - start_time)
+    if demo:
+      demo_frame = demo.get()
+      # print("demo:", time.time() - b_time)
+    if stop_sign.value == 1:
+      break
+
+    result = pose_tracker.process(image=input_frame)
+    pose_landmarks = result.pose_landmarks
+    
+    # Draw pose prediction.
+    output_frame = input_frame.copy()
+    if pose_landmarks is not None:
+        mp_drawing.draw_landmarks(
+            image=output_frame,
+            landmark_list=pose_landmarks,
+            connections=mp_pose.POSE_CONNECTIONS)
+        
+    if demo:
+      h, w, _ = output_frame.shape
+      output_frame = cv2.resize(output_frame, (int(w * demo_scale), int(h * demo_scale)))
+      h, w, _ = output_frame.shape
+      demo_frame[0:h, 0:w, :] = output_frame
+      output_frame = demo_frame
+
+    if pose_landmarks is not None:
+        # Get landmarks.
+        p12_x = pose_landmarks.landmark[12].x
+        p12_y = pose_landmarks.landmark[12].y
+        x_std = pose_landmarks.landmark[11].x - p12_x 
+        y_std = pose_landmarks.landmark[24].y - p12_y
+        
+        pose_landmarks = np.array([[(lmk.x - p12_x) / x_std, (lmk.y - p12_y) / y_std]
+                                    for lmk in pose_landmarks.landmark], dtype=np.float32)
+        assert pose_landmarks.shape == (33, 2), 'Unexpected landmarks shape: {}'.format(pose_landmarks.shape)
+        
+        result = model.predict_proba(pose_landmarks[:,:2].reshape(1, -1))[0]
+        
+        # for i in range(len(pose)):
+            # pose_prob[pose[i]] = result[i] * 10
+        
+        pose_prob = {pose[i]:result[i] * 10 for i in range(len(pose))}
+        pose_classification = pose_prob
+        # print("result:", result)
+        '''
+        # Classify the pose on the current frame.
+        pose_classification = pose_classifier(pose_landmarks)
+        '''
+        # Smooth classification using EMA.
+        pose_classification_filtered = pose_classification_filter(pose_classification)
+        # Count repetitions.
+        repetitions_count = repetition_counter(pose_classification_filtered)
+        output_frame = drawText(output_frame, point=(10, 360), texts=pose_prob)
+        target = {"Next":str(repetition_counter.target)}
+        # print(target)
+        output_frame = drawText(output_frame, fontScale=2, point=(10, 660), texts=target )
+
+    else:
+        # No pose => no classification on current frame.
+        pose_classification = None
+        
+        # Still add empty classification to the filter to maintaing correct
+        # smoothing for future frames.
+        pose_classification_filtered = pose_classification_filter(dict())
+        pose_classification_filtered = None
+
+        # Don't update the counter presuming that person is 'frozen'. Just
+        # take the latest repetitions count.
+        repetitions_count = repetition_counter.n_repeats
+
+    end_time = time.time()
+    # print('End:',(end_time - start_time))
+    fps = 1 / (end_time - start_time)
+    # output_frame = pose_classification_visualizer(
+    #         frame=output_frame,
+    #         pose_classification=pose_classification,
+    #         pose_classification_filtered=pose_classification_filtered,
+    #         repetitions_count=repetitions_count,
+    #         time= fps
+    #         )
+    
+    q_keypoint.put(output_frame)
+  
+
+def Demo_frame(q, exercise, stop_sign,  exercise_idx=0):
+  
+  for exercise_name in exercise:
+    for filename in os.listdir("Input_Video"):
+        if filename.split("-")[0] == exercise_name:
+          demo_src = os.path.join('./Input_Video', filename)
+
+    print("***",demo_src)
+    demo_cap = cv2.VideoCapture(demo_src)
+    idx = 0
     while True:
-        frames = pipeline.wait_for_frames()
-        input_frame = frames.get_color_frame()
-        input_frame = np.asanyarray(input_frame.get_data())
-        input_frame = cv2.cvtColor(input_frame, cv2.COLOR_BGR2RGB)
-    
-        pipeIn.send(input_frame)
-
-    pipeline.stop()
-
-def classification(pipeOut, q, exercise):
-
-    model_path = os.path.join('./Train', exercise, 'params', exercise + '.pkl')
-
-    with open('./rule.yaml', 'r') as f:
-      config = yaml.load(f, Loader=yaml.SafeLoader)
-    
-    with open(model_path, 'rb') as f:
-      model = pickle.load(f)
-
-    pose = config[int(exercise)]['pose']
-
-    pose_tracker = mp_pose.Pose(model_complexity=0)
-
-    pose_classification_filter = EMADictSmoothing(
-        window_size=10,
-        alpha=0.2)
-
-    repetition_counter = RepetitionCounter_Custom(
-        enter_threshold=6,
-        exit_threshold=4, 
-        circle_order=config[int(exercise)]['rule'])
-
-    pose_classification_visualizer = PoseClassificationVisualizer(
-        class_name=class_name,
-        plot_x_max=video_n_frames,
-        # Graphic looks nicer if it's the same as `top_n_by_mean_distance`.
-        plot_y_max=10)
-
-    while True:
-        start_time = time.time()
-        input_frame = pipeOut.recv()
-        result = pose_tracker.process(image=input_frame)
-        pose_landmarks = result.pose_landmarks
-        
-        # Draw pose prediction.
-        output_frame = input_frame.copy()
-        if pose_landmarks is not None:
-            mp_drawing.draw_landmarks(
-                image=output_frame,
-                landmark_list=pose_landmarks,
-                connections=mp_pose.POSE_CONNECTIONS)
-            
-        if pose_landmarks is not None:
-            # Get landmarks.
-            p12_x = pose_landmarks.landmark[12].x
-            p12_y = pose_landmarks.landmark[12].y
-            x_std = pose_landmarks.landmark[11].x - p12_x 
-            y_std = pose_landmarks.landmark[24].y - p12_y
-            
-            pose_landmarks = np.array([[(lmk.x - p12_x) / x_std, (lmk.y - p12_y) / y_std]
-                                        for lmk in pose_landmarks.landmark], dtype=np.float32)
-            assert pose_landmarks.shape == (33, 2), 'Unexpected landmarks shape: {}'.format(pose_landmarks.shape)
-            
-            result = model.predict_proba(pose_landmarks[:,:2].reshape(1, -1))[0]
-            
-            # for i in range(len(pose)):
-                # pose_prob[pose[i]] = result[i] * 10
-            
-            pose_prob = {pose[i]:result[i] * 10 for i in range(len(pose))}
-            pose_classification = pose_prob
-            print("result:", result)
-            '''
-            # Classify the pose on the current frame.
-            pose_classification = pose_classifier(pose_landmarks)
-            '''
-            # Smooth classification using EMA.
-            pose_classification_filtered = pose_classification_filter(pose_classification)
-            # Count repetitions.
-            repetitions_count = repetition_counter(pose_classification_filtered)
-            output_frame = drawText(output_frame, point=(10, 360), texts=pose_prob)
-            target = {"Next":str(repetition_counter.target)}
-            print(target)
-            output_frame = drawText(output_frame, fontScale=2, point=(10, 660), texts=target )
-
-        else:
-            # No pose => no classification on current frame.
-            pose_classification = None
-            
-            # Still add empty classification to the filter to maintaing correct
-            # smoothing for future frames.
-            pose_classification_filtered = pose_classification_filter(dict())
-            pose_classification_filtered = None
-
-            # Don't update the counter presuming that person is 'frozen'. Just
-            # take the latest repetitions count.
-            repetitions_count = repetition_counter.n_repeats
-        
-        end_time = time.time()
-        fps = 1 / (end_time - start_time)
-        output_frame = pose_classification_visualizer(
-                frame=output_frame,
-                pose_classification=pose_classification,
-                pose_classification_filtered=pose_classification_filtered,
-                repetitions_count=repetitions_count,
-                time= fps
-                )
-        
-        q.put(output_frame)
+      start = time.time()
+      success, demo_frame = demo_cap.read()
+      if idx % 100 == 0:
+        print(idx,",", end=" ")
+      if not success:
+        exercise_idx.value += 1
+        break
+      if len(exercise) < exercise_idx.value or stop_sign.value == 1:
+        stop_sign.value = 1
+        break
+      idx += 1
+      q.put(demo_frame)
       
+  
 
-def Camera_get_frame(pipeIn,):
-    video_cap = cv2.VideoCapture(0)
-    width = 1280 
-    height = 720
-    video_cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    video_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-
-    while True:
-        success, input_frame = video_cap.read()
-        if not success:
-            print(" No camera")
-            break
-        pipeIn.send(input_frame)
-
-
-def show_image_process(qIn, stop_sign, exercise, demo, demo_scale=0.2):
+def show_image_process(qIn, stop_sign, ):
 
     video_width = 1920
     video_height = 1080
     video_fps = 30
 
-    cv2.namedWindow("Img", cv2.WINDOW_NORMAL) 
-    cv2.resizeWindow("Img", video_width, video_height)
+    # cv2.namedWindow("Img", cv2.WINDOW_NORMAL) 
+    # cv2.resizeWindow("Img", video_width, video_height)
 
     Record_dir = './Record'
     filename = str(datetime.now().strftime("%Y%m%d_%H%M%S"))
     out_video_path = os.path.join(Record_dir, filename + '.mp4')
-    
-    for filename in os.listdir("Input_Video"):
-      if filename.split("-")[0] == exercise:
-        demo_src = os.path.join('./Input_Video', filename)
 
     if not os.path.exists(Record_dir):
       os.makedirs(Record_dir)
-
-    if demo:
-        demo_cap = cv2.VideoCapture(demo_src)
     
     out = cv2.VideoWriter(out_video_path, cv2.VideoWriter_fourcc(*'mp4v'), video_fps, (video_width, video_height))
 
     while True:
 
-        camera_frame = qIn.get()
-        camera_frame = cv2.cvtColor(np.asarray(camera_frame), cv2.COLOR_RGB2BGR)
-
-        if demo:
-            success, demo_frame = demo_cap.read()
-            
-            if not success:
-                out.release()
-                stop_sign.value = 0
-                break
-                
-            h, w, _ = camera_frame.shape
-            camera_frame = cv2.resize(camera_frame, (int(w * demo_scale), int(h * demo_scale)))
-            h, w, _ = camera_frame.shape
-            demo_frame[0:h, 0:w, :] = camera_frame
-
-        else:
-            demo_frame = camera_frame
-        
-        cv2.imshow('Img', demo_frame)
-        out.write(demo_frame)
+        frame = qIn.get()
+        frame = np.asarray(frame)
+        cv2.imshow('Img', frame)
+        out.write(frame)
         key = cv2.waitKey(1)
         
-        if key == 27 or 0xFF == ord('q'):
-            out.release()
-            stop_sign.value = 0
-            break
+        if key == 27 or 0xFF == ord('q') or stop_sign.value == 1:
+          out.release()
+          stop_sign.value = 1
+          break
+    
+          
 
 
 class FullBodyPoseEmbedder(object):

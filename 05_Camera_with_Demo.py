@@ -26,8 +26,7 @@ def main():
                                args=(q_camera, q_keypoint, exercise, stop_sign), 
                                kwargs={"demo": q_demo, "exercise_idx": exercise_idx})
     p_show = Process(target=show_image_process, 
-                     args=(q_keypoint, stop_sign, ), 
-                     kwargs={"demo": q_demo})
+                     args=(q_keypoint, stop_sign, ), )
     p_realsense.start()
     p_demo.start()
     p_classification.start()

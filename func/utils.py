@@ -105,7 +105,7 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
     model = pickle.load(f)
 
   pose = config[int(exercise[exercise_idx.value])]['pose']
-  pose_tracker = mp_pose.Pose(model_complexity=0)
+  pose_tracker = mp_pose.Pose(pip =0)
 
   pose_classification_filter = EMADictSmoothing(
       window_size=10,
@@ -253,8 +253,8 @@ def show_image_process(qIn, stop_sign, ):
     video_height = 1080
     video_fps = 30
 
-    # cv2.namedWindow("Img", cv2.WINDOW_NORMAL) 
-    # cv2.resizeWindow("Img", video_width, video_height)
+    cv2.namedWindow("Img", cv2.WINDOW_NORMAL) 
+    cv2.resizeWindow("Img", video_width, video_height)
 
     Record_dir = './Record'
     filename = str(datetime.now().strftime("%Y%m%d_%H%M%S"))

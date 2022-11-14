@@ -1,4 +1,5 @@
 from matplotlib import pyplot as plt
+import asyncio 
 import io
 from PIL import Image, ImageFont, ImageDraw
 import time
@@ -18,6 +19,8 @@ from mediapipe.python.solutions import drawing_utils as mp_drawing
 from mediapipe.python.solutions import pose as mp_pose
 import pickle
 from multiprocessing import  current_process
+
+
 class_name = 'down'
 video_n_frames = 1200
 
@@ -65,14 +68,14 @@ def RealSense_get_frame(q, stop_sign) :
   while True:
 
     if q.qsize() > 30:
-      time.sleep(0.5)
+      time.sleep(0.2)
 
     frames = pipeline.wait_for_frames()
     input_frame = frames.get_color_frame()
     input_frame = np.asanyarray(input_frame.get_data())
     # input_frame = cv2.cvtColor(input_frame, cv2.COLOR_BGR2RGB)
 
-    q.put(input_frame)
+    q.put(input_frame) 
     
     if stop_sign.value == 1:
       break
@@ -88,7 +91,7 @@ def Camera_get_frame(q, stop_sign):
   while True:
 
     if q.qsize() > 30:
-      time.sleep(0.5)
+      time.sleep(0.2)
 
     success, input_frame = video_cap.read()
     if not success:
@@ -100,21 +103,94 @@ def Camera_get_frame(q, stop_sign):
     if stop_sign.value == 1:
       break
 
-def detect(qIn, model, qOut):
-  frame = qIn.get()
-  result = model.process(image=frame)
-  pose_landmarks = result.pose_landmarks
-  qOut.put([frame, pose_landmarks])
+def Demo_frame(q, exercise, stop_sign,  exercise_idx=0):
+  
+  for exercise_name in exercise:
+    for filename in os.listdir("Input_Video"):
+        if filename.split("-")[0] == exercise_name:
+          demo_src = os.path.join('./Input_Video', filename)
 
-def keypoints_detection(qIn, qOut, threads=2,):
-  pose_tracker = mp_pose.Pose()
+    # print("***",demo_src)
+    demo_cap = cv2.VideoCapture(demo_src)
+    idx = 0
+    while True:
 
+      if q.qsize() > 30:
+        time.sleep(0.2)
+
+      start = time.time()
+      success, demo_frame = demo_cap.read()
+      if idx % 100 == 0:
+        print(idx,",", end=" ")
+      if not success:
+        exercise_idx.value += 1
+        break
+      if len(exercise) < exercise_idx.value or stop_sign.value == 1:
+        stop_sign.value = 1
+        break
+      idx += 1
+      q.put(demo_frame)
+
+'''
+async def detect(qIn, qOut, model):
+    if not qIn.empty(): 
+      frame = qIn.get()
+      result = model.process(image=frame)
+      pose_landmarks = result.pose_landmarks
+      # qOut.put((frame, pose_landmarks, ))
+      return frame, pose_landmarks
+
+
+async def detection_async(qIn, qOut, max_jobs):
+    pose_tracker = []
+    num_pose = int(max_jobs/2)
+    for i in range(num_pose):
+      pose_tracker.append(mp_pose.Pose())
+      
+    a_time = time.time()
+
+    task = [detect(qIn, qOut, pose_tracker[i // num_pose], ) for i in range(max_jobs)]
+    out = await asyncio.gather(*task)
+    for i in out:
+      
+      qOut.put(i)
+    print("Time:", (time.time() - a_time) / 4)
+
+
+def keypoints_detection(qIn, qOut, max_jobs=12,):
+    while True:
+      a_time = time.time()
+      asyncio.run(detection_async(qIn, qOut, max_jobs))
+      print("*",qIn.qsize(), time.time() - a_time)
+
+'''
+
+def detect(qIn, qOut, pose_tracker,):
+    if not qIn.empty(): 
+      frame = qIn.get()
+      result = pose_tracker.process(image=frame)
+      pose_landmarks = result.pose_landmarks
+      qOut.put((frame, pose_landmarks, ))
+
+def keypoints_detection(qIn, qOut, threads=8,):
+  
+  pose_tracker = []
+  num_pose = int(threads/2)
+  for i in range(num_pose):
+    pose_tracker.append(mp_pose.Pose())
+  
   while True:
+    a_time = time.time()
+    jobs = []
     for i in range(threads):
-      t = Thread(target=detect, args=[qIn, pose_tracker, qOut])
+      t = Thread(target=detect, args=[qIn,  qOut, pose_tracker[i // num_pose]])
       t.start()
-      t.join()
-    
+      jobs.append(t)
+    for job in jobs:
+      job.join()
+    print("*",qIn.qsize(), f"{(time.time() - a_time) /threads:.6f}" )
+
+
 
 def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exercise_idx=0, demo_scale=0.4 ):
   
@@ -130,11 +206,11 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
     model = pickle.load(f)
 
   pose = config[int(exercise[exercise_idx.value])]['pose']
-  pose_tracker = mp_pose.Pose()
+  # pose_tracker = mp_pose.Pose()
 
   pose_classification_filter = EMADictSmoothing(
       window_size=10,
-      alpha=0.2)
+      alpha=0.2)  
 
   repetition_counter = RepetitionCounter_Custom(
       enter_threshold=6,
@@ -144,9 +220,9 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
   exercise_count = exercise_idx.value
   
   while True:
-
-    if q_keypoint.qsize() > 30:
-      time.sleep(0.5)
+    print("class:", q_camera.qsize())
+    # if q_keypoint.qsize() > 30:
+    #   time.sleep(0.2)
     
     if exercise_idx != exercise_count:
       model_path = os.path.join('./Train', 
@@ -157,7 +233,7 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
         model = pickle.load(f)
 
     start_time = time.time()
-    input_frame = q_camera.get()
+    input_frame, pose_landmarks  = q_camera.get()
     b_time = time.time()
     
     c_time = 0
@@ -168,8 +244,8 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
     if stop_sign.value == 1:
       break
 
-    result = pose_tracker.process(image=input_frame)
-    pose_landmarks = result.pose_landmarks
+    # result = pose_tracker.process(image=input_frame)
+    # pose_landmarks = result.pose_landmarks
     d_time = time.time()
     # Draw pose prediction.
     output_frame = input_frame.copy()
@@ -191,7 +267,7 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
 
     g_time, h_time, i_time = 0,0,0
     if pose_landmarks is not None:
-        # Get landmarks.
+        # Get landmarks. 
         p12_x = pose_landmarks.landmark[12].x
         p12_y = pose_landmarks.landmark[12].y
         x_std = pose_landmarks.landmark[11].x - p12_x 
@@ -218,7 +294,7 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
         # print(target)
         output_frame = drawText(output_frame, fontScale=2, point=(10, 660), texts=target )
         i_time = time.time()
-        print('___pose_landmarks___')
+        
     else:
         # No pose => no classification on current frame.
         pose_classification = None
@@ -231,20 +307,9 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
         # Don't update the counter presuming that person is 'frozen'. Just
         # take the latest repetitions count.
         repetitions_count = repetition_counter.n_repeats
-        print("_________________")
+        
     end_time = time.time()
-    print("Start",b_time - start_time, 
-          "bc:",c_time - b_time,
-          "cd:",d_time - c_time,
-          "de:",e_time - d_time,
-          "ef:",f_time - e_time,
-          "fg:",g_time - f_time,
-          "gh:",h_time - g_time,
-          "hi:",i_time - h_time,
-          "i_end:",end_time - i_time ,
-          "f_end:",end_time - f_time,
-          "total:",end_time - start_time,
-          )
+
     fps = 1 / (end_time - start_time)
     output_frame = drawText(
                       output_frame, 
@@ -252,37 +317,25 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
                       point=(int(output_frame.shape[1]*0.70) ,260), 
                       texts={"Count": repetitions_count, "fps": round(fps,3)}
                       )
-
+    j_time = time.time()
     q_keypoint.put(output_frame)
-  
+    k_time = time.time()
 
-def Demo_frame(q, exercise, stop_sign,  exercise_idx=0):
-  
-  for exercise_name in exercise:
-    for filename in os.listdir("Input_Video"):
-        if filename.split("-")[0] == exercise_name:
-          demo_src = os.path.join('./Input_Video', filename)
+    # print("Start",f"{b_time - start_time:.4f}", 
+    #   "bc:",f"{c_time - b_time:.4f}",
+    #   "cd:",f"{d_time - c_time:.4f}",
+    #   "de:",f"{e_time - d_time:.4f}",
+    #   "ef:",f"{f_time - e_time:.4f}",
+    #   "fg:",f"{g_time - f_time:.4f}",
+    #   "gh:",f"{h_time - g_time:.4f}",
+    #   "hi:",f"{i_time - h_time:.4f}",
+    #   "i_end:",f"{end_time - i_time:.4f}" ,
+    #   "f_end:",f"{end_time - f_time:.4f}",
+    #   "total:",f"{end_time - start_time:.4f}",
+    #   "kj:",f"{j_time - k_time:.4f}",
+    #   )
 
-    print("***",demo_src)
-    demo_cap = cv2.VideoCapture(demo_src)
-    idx = 0
-    while True:
 
-      if q.qsize() > 30:
-        time.sleep(0.5)
-
-      start = time.time()
-      success, demo_frame = demo_cap.read()
-      if idx % 100 == 0:
-        print(idx,",", end=" ")
-      if not success:
-        exercise_idx.value += 1
-        break
-      if len(exercise) < exercise_idx.value or stop_sign.value == 1:
-        stop_sign.value = 1
-        break
-      idx += 1
-      q.put(demo_frame)
       
   
 
@@ -305,13 +358,18 @@ def show_image_process(qIn, stop_sign, ):
     out = cv2.VideoWriter(out_video_path, cv2.VideoWriter_fourcc(*'mp4v'), video_fps, (video_width, video_height))
 
     while True:
-
+        a_time = time.time()
         frame = qIn.get()
+        b_time = time.time()
         frame = np.asarray(frame)
+        end_time = time.time()
         cv2.imshow('Img', frame)
         out.write(frame)
         key = cv2.waitKey(1)
-        
+        fps = 1 / (end_time - a_time)
+
+        print("fps:", fps, f"{1/fps:.6f},{b_time-a_time:.6f}")
+
         if key == 27 or 0xFF == ord('q') or stop_sign.value == 1:
           out.release()
           stop_sign.value = 1

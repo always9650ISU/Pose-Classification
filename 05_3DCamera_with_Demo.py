@@ -1,18 +1,19 @@
 import cv2 
-from multiprocessing import Process, Pipe, Queue, Value
+from multiprocessing import Process, Pipe, Queue, Value, SimpleQueue
 import os 
 import time
-from func.utils import RealSense_get_frame, classification, show_image_process, Demo_frame
+from func.utils import RealSense_get_frame, classification, show_image_process, Demo_frame, keypoints_detection
 
 
 
-exercise = ['101','102']
+exercise = ['201',]
         
 
 def main():
     q_camera = Queue()
     q_demo = Queue()
     q_keypoint = Queue()
+    q_show = SimpleQueue()
     stop_sign = Value('i', 0)
     exercise_idx = Value("i", 0)
 
@@ -22,13 +23,16 @@ def main():
     p_demo = Process(target=Demo_frame, 
                      args=(q_demo, exercise, stop_sign,),
                      kwargs={"exercise_idx": exercise_idx})
+    p_detect = Process(target=keypoints_detection,
+                       args=(q_camera, q_keypoint))
     p_classification = Process(target=classification, 
-                               args=(q_camera, q_keypoint, exercise, stop_sign), 
+                               args=(q_keypoint, q_show, exercise, stop_sign), 
                                kwargs={"demo": q_demo, "exercise_idx": exercise_idx})
     p_show = Process(target=show_image_process, 
-                     args=(q_keypoint, stop_sign, ), )
+                     args=(q_show, stop_sign, ), )
     p_realsense.start()
     p_demo.start()
+    p_detect.start()
     p_classification.start()
     p_show.start()
     
@@ -37,6 +41,7 @@ def main():
         if stop_sign.value == 1:
             p_realsense.terminate()
             p_classification.terminate()
+            p_detect.terminate()
             p_demo.terminate()
             p_show.terminate()
             break

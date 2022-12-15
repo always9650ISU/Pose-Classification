@@ -195,7 +195,7 @@ def keypoints_detection(qIn, qOut, threads=8,):
             jobs.append(t)
         for job in jobs:
             job.join()
-        print("*", qIn.qsize(), f"{(time.time() - a_time) /threads:.6f}")
+        # print("*", qIn.qsize(), f"{(time.time() - a_time) /threads:.6f}")
 
 
 def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exercise_idx=0, demo_scale=0.4):
@@ -240,26 +240,21 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
 
         start_time = time.time()
         # input_frame, pose_landmarks = q_camera.get()
-        length_landmarks = len(result.pose_landmarks.landmark)
+
         xs = []
         ys = []
         for i in range(3):
+
             input_frame, pose_landmarks = q_camera.get()
-            xs.append(
-                [result.pose_landmarks.landmark[i].x for i in range(length_landmarks)])
-            ys.append(
-                [result.pose_landmarks.landmark[i].y for i in range(length_landmarks)])
+            if pose_landmarks is not None:
+                length_landmarks = len(pose_landmarks.landmark)
 
-        # average keypoints from 3 frame
-        xs = np.sum(xs, axis=0) / len(xs)
-        ys = np.sum(ys, axis=0) / len(ys)
-        xs = xs.reshape(1, -1)
-        ys = ys.reshape(1, -1)
-        pose_landmarks = np.concatenate([xs, ys], axis=0)
+                # if pose_landmarks is not None:
+                xs.append(
+                    [pose_landmarks.landmark[i].x for i in range(length_landmarks)])
+                ys.append(
+                    [pose_landmarks.landmark[i].y for i in range(length_landmarks)])
 
-        b_time = time.time()
-
-        c_time = 0
         if demo:
             demo_frame = demo.get()
             c_time = time.time()
@@ -278,6 +273,14 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
                 landmark_list=pose_landmarks,
                 connections=mp_pose.POSE_CONNECTIONS)
         e_time = time.time()
+
+        if xs:
+            # average keypoints from frames
+            xs = np.sum(xs, axis=0) / len(xs)
+            ys = np.sum(ys, axis=0) / len(ys)
+            xs = xs.reshape(1, -1)
+            ys = ys.reshape(1, -1)
+            pose_landmarks = np.concatenate([xs, ys], axis=0)
 
         f_time = 0
         if demo:

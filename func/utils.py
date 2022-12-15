@@ -226,7 +226,7 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
     exercise_count = exercise_idx.value
 
     while True:
-        print("class:", q_camera.qsize())
+        # print("class:", q_camera.qsize())
         # if q_keypoint.qsize() > 30:
         #   time.sleep(0.2)
 
@@ -280,8 +280,8 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
             ys = np.sum(ys, axis=0) / len(ys)
             xs = xs.reshape(1, -1)
             ys = ys.reshape(1, -1)
-            pose_landmarks = np.concatenate([xs, ys], axis=0)
-
+            pose_landmarks = np.concatenate([xs, ys], axis=0).reshape(2, -1)
+            
         f_time = 0
         if demo:
             h, w, _ = output_frame.shape
@@ -305,7 +305,7 @@ def classification(q_camera, q_keypoint, exercise, stop_sign, demo=False, exerci
             new_origin = pose_landmarks[:, 12].reshape(2, -1)
             std = np.array(
                 [pose_landmarks[0, 11], pose_landmarks[1, 24]]).reshape(2, -1) - new_origin
-            pose_landmarks = pose_landmarks - new_origin / std
+            pose_landmarks = (pose_landmarks - new_origin) / std
             pose_landmarks = pose_landmarks.T
             assert pose_landmarks.shape == (
                 33, 2), 'Unexpected landmarks shape: {}'.format(pose_landmarks.shape)
@@ -404,7 +404,7 @@ def show_image_process(qIn, stop_sign, ):
         key = cv2.waitKey(1)
         fps = 1 / (end_time - a_time)
 
-        print("fps:", fps, f"{1/fps:.6f},{b_time-a_time:.6f}")
+        # print("fps:", fps, f"{1/fps:.6f},{b_time-a_time:.6f}")
 
         if key == 27 or 0xFF == ord('q') or stop_sign.value == 1:
             out.release()

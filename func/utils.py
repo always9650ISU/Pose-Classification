@@ -61,7 +61,6 @@ def RealSense_get_frame(q, resize=None, height=720, width=1280, fps=30):
 
     sensor = profile.get_device().query_sensors()
     sensor[1].set_option(rs.option.frames_queue_size, 32)
-
     while True:
 
         if q.qsize() > 30:
@@ -73,7 +72,8 @@ def RealSense_get_frame(q, resize=None, height=720, width=1280, fps=30):
 
         if resize:
             input_frame = cv2.resize(input_frame, resize)
-        # input_frame = cv2.cvtColor(input_frame, cv2.COLOR_BGR2RGB)
+        input_frame = cv2.cvtColor(input_frame, cv2.COLOR_BGR2RGB)
+        input_frame = cv2.flip(input_frame, 1)
 
         q.put(input_frame)
 
@@ -174,7 +174,6 @@ def keypoints_detection(qIn, qOut, max_jobs=12,):
 def detect(qIn, qFrameOut, qKeypointsOut, pose_tracker,):
     if not qIn.empty():
         frame = qIn.get()
-
         result = pose_tracker.process(image=frame)
         pose_landmarks = result.pose_landmarks
         if pose_landmarks is not None:
@@ -182,8 +181,8 @@ def detect(qIn, qFrameOut, qKeypointsOut, pose_tracker,):
                 image=frame,
                 landmark_list=pose_landmarks,
                 connections=mp_pose.POSE_CONNECTIONS)
-        print('***', qFrameOut.qsize())
-        qFrameOut.put((1, 0, frame))
+
+        qFrameOut.put((1, frame))
         qKeypointsOut.put(pose_landmarks)
 
 
@@ -360,47 +359,57 @@ def classification(q_camera,
 '''
 
 
-def classification(q_keypoints, q_prediction, exercise,  demo=False, exercise_idx=0, demo_scale=0.4):
-
+def classification_init(exercise_idx,):
     model_path = os.path.join('./Train',
-                              exercise[exercise_idx.value],
+                              exercise_idx,
                               'params',
-                              exercise[exercise_idx.value] + '.pkl')
+                              exercise_idx + '.pkl')
 
-    with open('./rule.yaml', 'r') as f:
+    rule_path = './rule.yaml'
+    with open(rule_path, 'r') as f:
         config = yaml.load(f, Loader=yaml.SafeLoader)
 
-    with open(model_path, 'rb') as f:
-        model = pickle.load(f)
+    if not os.path.exists(model_path):
+        model, pose, repetition_counter = None, None, None
+    else:
+        print("Load_model:", model_path)
 
-    pose = config[int(exercise[exercise_idx.value])]['pose']
-    # pose_tracker = mp_pose.Pose()
+        with open(model_path, 'rb') as f:
+            model = pickle.load(f)
+
+        pose = config[int(exercise_idx)]['pose']
+
+        repetition_counter = RepetitionCounter_Custom(
+            enter_threshold=6,
+            exit_threshold=4,
+            circle_order=config[int(exercise_idx)]['rule'])
+
+    return model, pose, repetition_counter
+
+
+def classification(q_keypoints, q_prediction, exercise,  demo=False, exercise_idx=0, demo_scale=0.4):
+
+    model, pose, repetition_counter = classification_init(exercise_idx.value)
 
     pose_classification_filter = EMADictSmoothing(
         window_size=10,
         alpha=0.2)
 
-    repetition_counter = RepetitionCounter_Custom(
-        enter_threshold=6,
-        exit_threshold=4,
-        circle_order=config[int(exercise[exercise_idx.value])]['rule'])
+    # repetition_counter = RepetitionCounter_Custom(
+    #     enter_threshold=6,
+    #     exit_threshold=4,
+    #     circle_order=config[int(exercise[0])]['rule'])
 
-    exercise_count = exercise_idx.value
+    Current_exercise_idx = exercise_idx.value
 
     while True:
-        print("class:", q_keypoints.qsize())
-        # if q_keypoint.qsize() > 30:
-        #   time.sleep(0.2)
+        if exercise_idx.value != Current_exercise_idx:
+            model, pose, repetition_counter = classification_init(
+                exercise_idx.value)
+            Current_exercise_idx = exercise_idx.value
 
-        if exercise_idx != exercise_count:
-            model_path = os.path.join('./Train',
-                                      exercise[exercise_idx.value],
-                                      'params',
-                                      exercise[exercise_idx.value] + '.pkl')
-            with open(model_path, 'rb') as f:
-                model = pickle.load(f)
-
-        start_time = time.time()
+        if model is None:
+            continue
 
         xs = []
         ys = []
@@ -421,18 +430,7 @@ def classification(q_keypoints, q_prediction, exercise,  demo=False, exercise_id
             ys = ys.reshape(1, -1)
             pose_landmarks = np.concatenate([xs, ys], axis=0)
 
-        # c_time = 0
-        # if demo:
-        #     demo_frame = demo.get()
-
-        f_time = 0
-        # if demo:
-        #     h, w, _ = output_frame.shape
-        #     output_frame = cv2.resize(
-        #         output_frame, (int(w * demo_scale), int(h * demo_scale)))
-        #     h, w, _ = output_frame.shape
-        #     demo_frame[0:h, 0:w, :] = output_frame
-        #     output_frame = demo_frame
+        output_text = {}
 
         if pose_landmarks is not None:
             # Get landmarks.
@@ -449,22 +447,16 @@ def classification(q_keypoints, q_prediction, exercise,  demo=False, exercise_id
             result = model.predict_proba(
                 pose_landmarks[:, : 2].reshape(1, -1))[0]
 
-            # for i in range(len(pose)):
-            # pose_prob[pose[i]] = result[i] * 10
-
             pose_prob = {pose[i]: result[i] * 10 for i in range(len(pose))}
             pose_classification = pose_prob
+
             # Smooth classification using EMA.
             pose_classification_filtered = pose_classification_filter(
                 pose_classification)
             # Count repetitions.
             repetitions_count = repetition_counter(
                 pose_classification_filtered)
-            # output_frame = drawText(
-            #     output_frame, point=(10, 360), texts=pose_prob)
-            # target = {"Next": str(repetition_counter.target)}
-            # output_frame = drawText(
-            #     output_frame, fontScale=2, point=(10, 660), texts=target)
+            output_text = pose_prob.copy()
 
         else:
             # No pose => no classification on current frame.
@@ -479,17 +471,10 @@ def classification(q_keypoints, q_prediction, exercise,  demo=False, exercise_id
             # take the latest repetitions count.
             repetitions_count = repetition_counter.n_repeats
 
-        end_time = time.time()
+        output_text["Next"] = str(repetition_counter.target)
+        output_text['Count'] = repetitions_count
 
-        fps = 1 / (end_time - start_time)
-        # output_frame = drawText(
-        #     output_frame,
-        #     fontScale=3,
-        #     point=(int(output_frame.shape[1]*0.70), 260),
-        #     texts={"Count": repetitions_count, "fps": round(fps, 3)}
-        # )
-
-        # q_prediction.put(output_frame)
+        q_prediction.put((1, output_text))
 
 
 def show_image_process(qIn, stop_sign, ):
@@ -792,13 +777,13 @@ class EMADictSmoothing(object):
 
         # Get smoothed values.
         smoothed_data = dict()
+
         for key in keys:
             factor = 1.0
             top_sum = 0.0
             bottom_sum = 0.0
             for data in self._data_in_window:
                 value = data[key] if key in data else 0.0
-
                 top_sum += factor * value
                 bottom_sum += factor
 

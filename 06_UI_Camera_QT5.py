@@ -3,7 +3,7 @@ import configparser
 import os
 import numpy as np
 import threading
-from multiprocessing import Process, Manager, Queue, set_start_method
+from multiprocessing import Process, Manager, Queue
 from ctypes import c_char_p
 from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
@@ -13,7 +13,7 @@ from PyQt5.QtMultimediaWidgets import QVideoWidget
 from PyQt5.QtGui import QImage, QPixmap
 from mainWindow import Ui_MainWindow
 from func.utils import classification, show_image_process, Demo_frame, keypoints_detection
-from func.ReasSense import RealSense_get_frame
+from func.Camera import Camera_get_frame
 from func.QT5Util import Q_get, Change_Model, Listen_Playlist
 
 
@@ -271,7 +271,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         manager = Manager()
         self.exercise_idx = manager.Value(c_char_p, " ")
 
-        self.p_realsense = Process(target=RealSense_get_frame,
+        self.p_realsense = Process(target=Camera_get_frame,
                                    args=(q_camera, ),
                                    kwargs={"resize": (self.GUICamera_width, self.GUICamera_height)})
         self.p_detect = Process(target=keypoints_detection,
